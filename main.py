@@ -4,9 +4,13 @@ import CONSTANTS
 import chess
 import random
 import natural_selection
+import minimax
 
 def main():
-    computers = natural_selection.main()
+    if CONSTANTS.BEST_COMPUTER:
+        computers = natural_selection.main()
+    elif CONSTANTS.MINIMAX_COMPUTER:
+        computerToPlay = minimax.main()
     global FPSCLOCK
     pygame.init()
     FPSCLOCK = pygame.time.Clock()
@@ -25,18 +29,20 @@ def main():
     move_stack = "1. "
     pygame.display.set_caption(CONSTANTS.GAMENAME)
 
-    try:
-        toPlay = int(input("Enter the generation you want to play against: "))
-        toPlay -= 1
-    except ValueError:
-        toPlay = len(computers) - 1
+    if CONSTANTS.BEST_COMPUTER:
+        try:
+            toPlay = int(input("Enter the generation you want to play against: "))
+            toPlay -= 1
+        except ValueError:
+            toPlay = len(computers) - 1
     
-    if toPlay < 0:
-        toPlay = 0
-    if toPlay > len(computers) - 1:
-        toPlay = len(computers) - 1
+        if toPlay < 0:
+            toPlay = 0
+        if toPlay > len(computers) - 1:
+            toPlay = len(computers) - 1
     
-    print("Best of Generation " + str(toPlay + 1) + " chosen.")
+        print("Best of Generation " + str(toPlay + 1) + " chosen.")
+        computerToPlay = computers[toPlay]
 
     #decide who goes first
     if random.randint(0, 1) == 1:
@@ -47,7 +53,10 @@ def main():
         COMPUTER = chess.WHITE
         PLAYER = chess.BLACK
         playerFirst = False
-    computers[toPlay].colorPlaying = COMPUTER
+    computerToPlay.colorPlaying = COMPUTER
+    if CONSTANTS.MINIMAX_COMPUTER:
+        computerToPlay.inEndgame = False
+        print("The AI's name is " + computerToPlay.name)
 
     while True: # main game loop
         if board.turn == PLAYER:
@@ -75,17 +84,19 @@ def main():
                     moved = False
                     move_stack = "1. "
                     pygame.display.set_caption(CONSTANTS.GAMENAME)
-                    try:
-                        toPlay = int(input("Enter the generation you want to play against: "))
-                        toPlay -= 1
-                    except ValueError:
-                        toPlay = len(computers) - 1
-                    
-                    if toPlay < 0:
-                        toPlay = 0
-                    if toPlay > len(computers) - 1:
-                        toPlay = len(computers) - 1
-                    print("Best of Generation " + str(toPlay + 1) + " chosen.")
+                    if CONSTANTS.BEST_COMPUTER:
+                        try:
+                            toPlay = int(input("Enter the generation you want to play against: "))
+                            toPlay -= 1
+                        except ValueError:
+                            toPlay = len(computers) - 1
+                        
+                        if toPlay < 0:
+                            toPlay = 0
+                        if toPlay > len(computers) - 1:
+                            toPlay = len(computers) - 1
+                        print("Best of Generation " + str(toPlay + 1) + " chosen.")
+                        computerToPlay = computers[toPlay]
                     #decide who goes first
                     if random.randint(0, 1) == 1:
                         COMPUTER = chess.BLACK
@@ -95,7 +106,9 @@ def main():
                         COMPUTER = chess.WHITE
                         PLAYER = chess.BLACK
                         playerFirst = False
-                    computers[toPlay].colorPlaying = COMPUTER
+                    computerToPlay.colorPlaying = COMPUTER
+                    if CONSTANTS.MINIMAX_COMPUTER:
+                        computerToPlay.inEndgame = False
                 elif event.type == MOUSEMOTION and dragging_piece is not None and not game_over:
                     #update position of piece being dragged
                     piece_x, piece_y = event.pos
@@ -137,18 +150,17 @@ def main():
                     pygame.quit()
                     sys.exit()
             if not game_over:
-                pygame.time.wait(1000)
+                if not CONSTANTS.MINIMAX_COMPUTER:
+                    pygame.time.wait(1000)
                 if CONSTANTS.RANDOM_COMPUTER:
                     computer_move = random.choice([move for move in board.legal_moves])
                 elif CONSTANTS.BEST_COMPUTER:
-                    possibleMoves = [move for move in board.legal_moves]
-                    bestMove = [possibleMoves[0], computers[toPlay].evalMove(possibleMoves[0], board)]
-                    for move in possibleMoves:
-                        scoreForMove = computers[toPlay].evalMove(move, board)
-                        if scoreForMove > bestMove[1]:
-                            bestMove[1] = scoreForMove
-                            bestMove[0] = move
-                    computer_move = bestMove[0]
+                    computer_move = computerToPlay.getBestMove(board, computerToPlay.colorPlaying)
+                elif CONSTANTS.MINIMAX_COMPUTER:
+                    computer_move = computerToPlay.getBestMove(board, computerToPlay.colorPlaying)[0]
+                    print(minimax.timesCalled)
+                    if computer_move == None:
+                        computer_move = random.choice([move for move in board.legal_moves])
                 move_stack += board.san(computer_move) + " "
                 board.push(computer_move)
                 board.turn = PLAYER

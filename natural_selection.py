@@ -5,14 +5,15 @@ import numpy as np
 import chess
 
 #some constants
-MUTATIONPERCENTAGE = 30
+MUTATIONPERCENTAGE = 25
 DEATHPERCENTAGE = 45 #useless for now
-MAXORGANISMS = 70
-HIDDENLAYERSIZE = 13
+MAXORGANISMS = 10
+HIDDENLAYERSIZE = 40
 NUMLAYERS = 3
-GAMESPERGEN = 3
-NUMGENERATION = 30
-MUTATIONSTANDARDDEV = 0.2
+GAMESPERGEN = 1
+NUMGENERATION = 10
+MUTATIONSTANDARDDEV = 0.05
+MOVEDEPTH = 2
 
 tagNum = 0
 
@@ -34,7 +35,7 @@ class ecosystem():
         for i in range(MAXORGANISMS):
             self.population.append(organism())
             self.population[i].assignName()
-    
+
     #run the simulation
     def runSimulation(self):
         bestOrganisms = []
@@ -60,6 +61,7 @@ class ecosystem():
     def simulateGeneration(self):
         for game in range(GAMESPERGEN):
             random.shuffle(self.population)
+            countDraws = 0
             for i in range(int(len(self.population) / 2)):
                 board = chess.Board()
                 if random.randint(0, 1) == 1:
@@ -73,35 +75,33 @@ class ecosystem():
                     playerFirst = self.population[2 * i]
                     playerSecond = self.population[2 * i + 1]
                 while not board.is_game_over():
-                    possibleMoves = [move for move in board.legal_moves]
-                    bestMove = [possibleMoves[0], playerFirst.evalMove(possibleMoves[0], board)]
-                    for move in possibleMoves:
-                        scoreForMove = playerFirst.evalMove(move, board)
-                        if scoreForMove > bestMove[1]:
-                            bestMove[1] = scoreForMove
-                            bestMove[0] = move
-                    board.push(bestMove[0])
-                    possibleMoves = [move for move in board.legal_moves]
-                    if len(possibleMoves) != 0:
-                        bestMove = [possibleMoves[0], playerSecond.evalMove(possibleMoves[0], board)]
-                        for move in possibleMoves:
-                            scoreForMove = playerSecond.evalMove(move, board)
-                            if scoreForMove > bestMove[1]:
-                                bestMove[1] = scoreForMove
-                                bestMove[0] = move
-                        board.push(bestMove[0])
+                    toMove = playerFirst.getBestMove(board, playerFirst.colorPlaying)
+                    if toMove != None:
+                        colorMoving = chess.WHITE
+                        board.push(toMove)
+                    toMove = playerSecond.getBestMove(board, playerSecond.colorPlaying)
+                    if toMove != None:
+                        colorMoving = chess.BLACK
+                        board.push(toMove)
                 #update their scores and elo and tie number
                 playerFirst.totalGamesPlayed += 1
                 playerSecond.totalGamesPlayed += 1
-                if board.result() == "1-0":
+                result = board.result()
+                if board.is_fivefold_repetition() or board.is_seventyfive_moves(): #those responsible for draws will lose instead
+                    if colorMoving == chess.WHITE:
+                        result = "0-1"
+                    else:
+                        result = "1-0"
+                    countDraws += 1
+                if result == "1-0":
                     playerFirst.score += 1
                     playerFirst.totalWins += 1
                     playerSecond.totalLosses += 1
-                elif board.result() == "0-1":
+                elif result == "0-1":
                     playerSecond.score += 1
                     playerSecond.totalWins += 1
                     playerFirst.totalLosses += 1
-                elif board.result() == "1/2-1/2":
+                elif result == "1/2-1/2":
                     playerFirst.score += 0.5
                     playerSecond.score += 0.5
                     playerFirst.ties += 1
@@ -110,6 +110,7 @@ class ecosystem():
                 playerSecond.opponentEloTotal += playerFirst.elo
                 playerFirst.elo = int((playerFirst.opponentEloTotal + 400 * (playerFirst.totalWins - playerFirst.totalLosses))/playerFirst.totalGamesPlayed)
                 playerSecond.elo = int((playerSecond.opponentEloTotal + 400 * (playerSecond.totalWins - playerSecond.totalLosses))/playerSecond.totalGamesPlayed)
+            print("Stupid draws: " + str(countDraws))
     
     #choose a random amount of organisms to mutate and mutate them
     def mutateGeneration(self):
@@ -146,6 +147,7 @@ class ecosystem():
         if len(self.population) == 0: #everyone tied each other
             for organism in originalPopulation:
                 self.population.append(organism)
+            countKills = 0
         #display top of the generation
         self.population.sort(key=lambda x: (x.elo, x.score), reverse=True)
         toLoop = 5
@@ -181,11 +183,11 @@ class organism():
     def __init__(self): #initialize randomly if no params passed in
         global tagNum
         self.layers = [] #the layers
-        firstTheta = np.random.rand(HIDDENLAYERSIZE, 14)
+        firstTheta = np.random.rand(HIDDENLAYERSIZE, 32)
         self.thetas = [] #thetas, each index is the matrix
         self.thetas.append(firstTheta)
         for newTheta in range(NUMLAYERS - 1):
-            self.thetas.append(np.random.normal(0, 1, (HIDDENLAYERSIZE, HIDDENLAYERSIZE + 1)))
+            self.thetas.append(np.random.rand(HIDDENLAYERSIZE, HIDDENLAYERSIZE + 1))
         self.thetas.append(np.random.rand(1, HIDDENLAYERSIZE + 1))
         self.output = 0
         self.colorPlaying = None
@@ -215,125 +217,154 @@ class organism():
         self.colorPlaying = None
         self.ties = 0
     
-    def evalMove(self, move, board): #evaluate a move
-        sigmoid_v = np.vectorize(sigmoid) #set up sigmoid function
-        #create the input vector by getting information on the move
-        whitePoints, blackPoints = sumPoints(board)
-        if self.colorPlaying == chess.WHITE:
-            otherColor = chess.BLACK
-            color = 0
-            ownPoints = whitePoints
-            opponentPoints = blackPoints
-        else:
-            color = 1
-            otherColor = chess.WHITE
-            ownPoints = blackPoints
-            opponentPoints = whitePoints
-        #pieceType: 1-6 for pawn, knight, bishop, rook, queen, king
-        pieceType = board.piece_at(move.from_square).symbol()
-        if pieceType == 'p' or pieceType == 'P':
-            pieceType = 1
-        elif pieceType == 'n' or pieceType == 'N':
-            pieceType = 2
-        elif pieceType == 'b' or pieceType == 'B':
-            pieceType = 3
-        elif pieceType == 'r' or pieceType == 'R':
-            pieceType = 4
-        elif pieceType == 'q' or pieceType == 'Q':
-            pieceType = 5
-        elif pieceType == 'k' or pieceType == 'K':
-            pieceType = 6
-        #squares have value 1-64
-        squareFrom = move.from_square
-        squareTo = move.to_square
-        promotion = move.promotion
-        if promotion == None:
-            promotion = 0
-        elif promotion == chess.KNIGHT:
-            promotion = 1
-        elif promotion == chess.BISHOP:
-            promotion = 2
-        elif promotion == chess.ROOK:
-            promotion = 3
-        elif promotion == chess.QUEEN:
-            promotion = 4
-        toCapture = board.piece_at(move.to_square)
-        if toCapture == None:
-            toCapture = 0
-        else:
-            toCapture = toCapture.symbol()
-            if toCapture == 'p' or toCapture == 'P':
-                toCapture = 1
-            elif toCapture == 'n' or toCapture == 'N':
-                toCapture = 2
-            elif toCapture == 'b' or toCapture == 'B':
-                toCapture = 3
-            elif toCapture == 'r' or toCapture == 'R':
-                toCapture = 4
-            elif toCapture == 'q' or toCapture == 'Q':
-                toCapture = 5
-            else:
-                toCapture = 0
-        if board.gives_check(move):
-            willCheck = 1
-        else:
-            willCheck = 0
-        attackedBy = len(board.attackers(otherColor, move.to_square)) #what the piece is currently attacking
-        protecting = len(board.attackers(self.colorPlaying, move.to_square)) #what the piece is currently protecting
-        attackingPieces = 0
-        protectingPieces = 0
-        attacks = board.attacks(move.from_square)
-        for square in attacks:
-            if board.piece_at(square) != None and board.piece_at(square).color == otherColor: #what the piece will attack
-                attackingPieces += 1
-            elif board.piece_at(square) != None and board.piece_at(square).color == self.colorPlaying: #what the piece will protect
-                protectingPieces += 1
-        initial = np.matrix([[1, color, ownPoints, opponentPoints, pieceType, squareFrom, squareTo, promotion, toCapture, willCheck, 
-                              attackedBy, protecting, attackingPieces, protectingPieces]])
-        previous = initial
+    def getBestMove(self, board, color):
+        bestBoardScore = -1
+        toReturn = None
+        if board.is_game_over(): #game is over, no need for best move
+            return toReturn
+        possibleMoves = [move for move in board.legal_moves]
+        for move in possibleMoves:
+            newBoard = board.copy()
+            newBoard.push(move)
+            #if newBoard.is_repetition(5) and len(possibleMoves) != 1: #prevent 5-fold repetition
+                #continue
+            newColor = not color
+            boardScore = self.evalBoard(newBoard, newColor, 1)
+            if boardScore > bestBoardScore:
+                toReturn = move
+                bestBoardScore = boardScore
+        return toReturn
+
+    def evalBoard(self, board, color, depth=1, bestFound=-1):
+        global MOVEDEPTH
+        sigmoid_v = np.vectorize(sigmoid)
+        #score the original board
+        initialData = np.matrix([self.getInitialData(board, color)])
+        previous = initialData
         for theta in self.thetas:
             temp = previous * np.transpose(theta)
             temp = sigmoid_v(temp)
             previous = temp
             if not np.array_equal(theta, self.thetas[-1]):
                 previous = np.insert(previous, 0, values=1, axis=1)
-        return previous.item()
+        if depth >= MOVEDEPTH:
+            return previous.item()
+        if previous.item() < bestFound:
+            return bestFound
+        bestBoardScore = -1
+        possibleMoves = [move for move in board.legal_moves]
+        for move in possibleMoves:
+            newBoard = board.copy()
+            newBoard.push(move)
+            #if newBoard.is_repetition(5) and len(possibleMoves) != 1: #prevent 5-fold repetition
+                #continue
+            newColor = not color
+            boardScore = self.evalBoard(newBoard, newColor, depth + 1, bestBoardScore)
+            if boardScore > bestBoardScore:
+                bestBoardScore = boardScore
+        return bestBoardScore
+    
+    #gets the number of points white and black have respectively
+    #returns the number of points in same order
+    def getInitialData(self, board, color):
+        if color == chess.WHITE:
+            otherColor = chess.BLACK
+        else:
+            otherColor = chess.WHITE
+        boardCenter = [chess.D4, chess.D5, chess.E4, chess.E5]
+        toReturn = [0] * 31
+        maxData = [8, 2, 2, 2, 1, 8, 2, 2, 2, 1, 16, 26, 28, 27, 16, 26, 28, 27, 2, 10, 2, 10, 4, 4, 1, 1, 40, 8, 8, 8, 1]
+        #num fPawns, fKnights, bish, rook, queen, EPawns, knights, bish, rook, queen - 10
+        #squares attacked by fKnights, bish, rook, queen, EKnights, bish, rook, queen - 8
+        #friendly pawns controlling center, friendly pieces, enemy pawns, enemy pieces - 4
+        #center squares with friendly color piece on, center squares with enemy color piece on - 2
+        #friendly has castled, enemy, move number - 3
+        #friendly pawns supporting pawns, avg rank of friendly pawns, avg rank of enemy pawns - 3
+        #if current side is on check - 1
+
+        for square in chess.SQUARES:
+            if square in boardCenter:
+                attackers = list(board.attackers(color, square))
+                for i in range(len(attackers)):
+                    if board.piece_at(attackers[i]) == chess.PAWN:
+                        toReturn[18] += 1
+                    else:
+                        toReturn[19] += 1
+                attackers = list(board.attackers(otherColor, square))
+                for i in range(len(attackers)):
+                    if board.piece_at(attackers[i]) == chess.PAWN:
+                        toReturn[20] += 1
+                    else:
+                        toReturn[21] += 1
+                if board.piece_at(square) != None:
+                    if board.piece_at(square) == color:
+                        toReturn[22] += 1
+                    else:
+                        toReturn[23] += 1
+            if board.piece_at(square) != None:
+                if board.color_at(square) == color:
+                    if board.piece_at(square) == chess.PAWN:
+                        toReturn[0] += 1
+                        attackers = list(board.attackers(color, square))
+                        for i in range(len(attackers)):
+                            if board.piece_at(attackers[i]) == chess.PAWN:
+                                toReturn[27] += 1
+                        toReturn[28] += chess.square_rank(square)
+                    if board.piece_at(square) == chess.KNIGHT:
+                        toReturn[1] += 1
+                        toReturn[10] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.BISHOP:
+                        toReturn[2] += 1
+                        toReturn[11] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.ROOK:
+                        toReturn[3] += 1
+                        toReturn[12] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.QUEEN:
+                        toReturn[4] += 1
+                        toReturn[13] += len(board.attacks(square))
+                else:
+                    if board.piece_at(square) == chess.PAWN:
+                        toReturn[5] += 1
+                        toReturn[29] += chess.square_rank(square)
+                    if board.piece_at(square) == chess.KNIGHT:
+                        toReturn[6] += 1
+                        toReturn[14] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.BISHOP:
+                        toReturn[7] += 1
+                        toReturn[15] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.ROOK:
+                        toReturn[8] += 1
+                        toReturn[16] += len(board.attacks(square))
+                    if board.piece_at(square) == chess.QUEEN:
+                        toReturn[9] += 1
+                        toReturn[17] += len(board.attacks(square))
+        
+        if board.has_castling_rights(color):
+            toReturn[24] = 1
+        if board.has_castling_rights(otherColor):
+            toReturn[25] = 1
+        toReturn[26] = board.fullmove_number
+        if toReturn[26] > 40:
+            toReturn[26] = 40
+        if toReturn[0] != 0: #pawn rank takes avg
+            toReturn[28] /= toReturn[0]
+        if toReturn[5] != 0:
+            toReturn[29] /= toReturn[5]
+        if color == chess.BLACK: #whoever's playing black, their pawn rank has to flip around
+            toReturn[28] = 8 - toReturn[28]
+        else:
+            toReturn[29] = 8 - toReturn[29]
+        toReturn[30] = int(board.is_check())
+
+        #for i in range(len(toReturn)):
+        #    toReturn[i] = toReturn[i] / maxData[i]
+
+        toReturn.insert(1, 0) #insert 1 as bias variable
+
+        return toReturn
 
 def sigmoid(x):
     return 1 / (1 + math.exp(-0.1 * x))
-
-#gets the number of points white and black have respectively
-#returns the number of points in same order
-def sumPoints(board):
-    whiteTotal = 0
-    blackTotal = 0
-
-    for square in chess.SQUARES:
-        if board.piece_at(square) != None:
-            if board.color_at(square) == chess.WHITE:
-                if board.piece_at(square) == chess.PAWN:
-                    whiteTotal += 1
-                if board.piece_at(square) == chess.KNIGHT:
-                    whiteTotal += 3
-                if board.piece_at(square) == chess.BISHOP:
-                    whiteTotal += 3
-                if board.piece_at(square) == chess.ROOK:
-                    whiteTotal += 5
-                if board.piece_at(square) == chess.QUEEN:
-                    whiteTotal += 9
-            else:
-                if board.piece_at(square) == chess.PAWN:
-                    blackTotal += 1
-                if board.piece_at(square) == chess.KNIGHT:
-                    blackTotal += 3
-                if board.piece_at(square) == chess.BISHOP:
-                    blackTotal += 3
-                if board.piece_at(square) == chess.ROOK:
-                    blackTotal += 5
-                if board.piece_at(square) == chess.QUEEN:
-                    blackTotal += 9
-    
-    return whiteTotal, blackTotal
 
 #the function that main will call, returns a list with the best AI from each generation
 def main():

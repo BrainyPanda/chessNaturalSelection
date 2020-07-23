@@ -6,7 +6,8 @@ GAMENAME = "Demon-beater"
 FPS = 30
 
 RANDOM_COMPUTER = False
-BEST_COMPUTER = True
+BEST_COMPUTER = False
+MINIMAX_COMPUTER = True
 
 #            R    G    B
 GRAY     = (100, 100, 100)
